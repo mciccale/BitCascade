@@ -9,6 +9,9 @@ import java.rmi.RemoteException;
 import java.rmi.registry.LocateRegistry;
 import java.rmi.registry.Registry;
 import java.rmi.server.UnicastRemoteObject;
+import java.util.HashMap;
+import java.util.Map;
+
 import interfaces.Tracker;
 import interfaces.Seed;
 import interfaces.Leech;
@@ -20,11 +23,12 @@ import interfaces.FileInfo;
 class TrackerSrv extends UnicastRemoteObject implements Tracker  {
     public static final long serialVersionUID=1234567890L;
     String name;
+    Map<String, FileInfo> files;
     // TODO 1: añadir los campos que se requieran
     
     public TrackerSrv(String n) throws RemoteException {
         name = n;
-        // TODO 1: inicializar campos adicionales
+        files = new HashMap<>();
     }
     // NO MODIFICAR: solo para depurar
     public String getName() throws RemoteException {
@@ -33,14 +37,21 @@ class TrackerSrv extends UnicastRemoteObject implements Tracker  {
     // se publica fichero: debe ser sincronizado para asegurar exclusión mutua;
     // devuelve falso si ya estaba publicado un fichero con el mismo nombre
     public synchronized boolean announceFile(Seed publisher, String fileName, int blockSize, int numBlocks) throws RemoteException {
-        // TODO 1: se crea un objeto FileInfo con la información del fichero
-	// y se inserta en el mapa
+        // se crea un objeto con la información del fichero
+        FileInfo file = new FileInfo(publisher, blockSize, numBlocks);
+        // se comprueba si ya hay un fichero con el mismo nomnre publicado
+        if (files.containsKey(fileName)) {
+            System.out.println(publisher.getName() + " no ha podido publicar el fichero " + fileName);
+            return false;
+        }
+        // si no, se inserta en el mapa
+        files.put(fileName, file);
         System.out.println(publisher.getName() + " ha publicado " + fileName);
-        return false;
+        return true;
     }
-    // TODO 1: obtiene acceso a la metainformación de un fichero
+    // obtiene acceso a la metainformación de un fichero
     public synchronized FileInfo lookupFile(String fileName) throws RemoteException {
-        return null;
+        return files.get(fileName);
     }
     // TODO 3: se añade un nuevo leech a ese fichero (tercera fase)
     public boolean addLeech(Leech leech, String fileName) throws RemoteException {
@@ -51,12 +62,14 @@ class TrackerSrv extends UnicastRemoteObject implements Tracker  {
             System.err.println("Usage: TrackerSrv registryPortNumber name");
             return;
         }
-        if (System.getSecurityManager() == null)
-            System.setSecurityManager(new SecurityManager());
+       /*if (System.getSecurityManager() == null)
+            System.setSecurityManager(new SecurityManager());*/
         try {
             TrackerSrv srv = new TrackerSrv(args[1]);
-            // TODO 1: localiza el registry en el puerto recibido en args[0]]
-	    // y da de alta el servicio bajo el nombre "BitCascade"
+            // localiza el registry en el puerto especificado de esta máquina
+            Registry registry = LocateRegistry.getRegistry(Integer.parseInt(args[0]));
+            // da de alta el servicio bajo el nombre 'BitCascade'
+            registry.rebind("BitCascade", srv);
         }
         catch (Exception e) {
             System.err.println("Tracker exception:");

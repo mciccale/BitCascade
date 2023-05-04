@@ -10,8 +10,8 @@ class EchoClient {
             System.err.println("Usage: EchoClient registryHost registryPort word...");
             return;
         }
-        if (System.getSecurityManager() == null)
-            System.setSecurityManager(new SecurityManager());
+       /*if (System.getSecurityManager() == null)
+            System.setSecurityManager(new SecurityManager()); */
         try {
             // localiza el registry en la máquina y puerto especificados
             Registry registry = LocateRegistry.getRegistry(args[0], Integer.parseInt(args[1]));

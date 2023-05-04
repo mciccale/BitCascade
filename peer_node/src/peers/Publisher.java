@@ -9,7 +9,10 @@ import java.rmi.registry.Registry;
 import java.rmi.RemoteException;
 import java.rmi.server.UnicastRemoteObject;
 import java.io.File;
+import java.io.FileReader;
 import java.io.IOException;
+import java.io.RandomAccessFile;
+
 import interfaces.Seed;
 import interfaces.Tracker;
 
@@ -20,28 +23,46 @@ public class Publisher extends UnicastRemoteObject implements Seed {
     String file;
     String path; // convenio: path = name + "/" + file
     int blockSize;
+    int fileSize;
     int numBlocks;
+    transient RandomAccessFile fd;
 
     public Publisher(String n, String f, int bSize) throws RemoteException, IOException {
         name = n; // nombre del nodo (solo para depurar)
         file = f; // nombre del fichero especificado
         path = name + "/" + file; // convenio: directorio = nombre del nodo
         blockSize = bSize; // tamaño de bloque especificado
-	// Cálculo del nº bloques redondeado por exceso:
-	//     truco: ⌈x/y⌉ -> (x+y-1)/y
-        numBlocks = (int) (new File(path).length() + blockSize - 1)/blockSize;
-
-        // TODO 2: abrir el fichero para leer (RandomAccessFile)
+        fd = new RandomAccessFile(path, "r");
+	    // Cálculo del nº bloques redondeado por exceso:
+	    //     truco: ⌈x/y⌉ -> (x+y-1)/y
+        fileSize = (int) fd.length();
+        numBlocks = (int) (fd.length() + blockSize - 1)/blockSize;
     }
     public String getName() throws RemoteException {
         return name;
     }
+
     public byte [] read(int numBl) throws RemoteException {
         byte [] buf = null;
         System.out.println("publisher read " + numBl);
 
-        // TODO 2: realiza lectura solicitada devolviendo lo leído en buf 
-	// Cuidado con último bloque que probablemente no estará completo
+        // se asegura de que el bloque solicitado existe
+        if (numBl < numBlocks) {
+            try {
+                int bufSize = blockSize;
+                // último bloque solicitado
+                if (numBl + 1 == numBlocks) {
+                    int newSize = (int) (fileSize % blockSize);
+                    if (newSize > 0) bufSize = newSize;
+                }
+                // se lee el archivo
+                buf = new byte[bufSize];
+                fd.seek(numBl * blockSize);
+                int n = fd.read(buf);
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
         return buf;
     }
     public int getNumBlocks() { // no es método remoto
@@ -55,23 +76,22 @@ public class Publisher extends UnicastRemoteObject implements Seed {
             System.err.println("Usage: Publisher registryHost registryPort name file blockSize");
             return;
         }
-        if (System.getSecurityManager() == null)
-            System.setSecurityManager(new SecurityManager());
+        /*if (System.getSecurityManager() == null)
+            System.setSecurityManager(new SecurityManager());*/
 
         try {
-            // TODO 1: localiza el registry en el host y puerto indicado
-            // y obtiene la referencia remota al tracker asignándola
-            // a esta variable:
-            Tracker trck = null;
-
+            // localiza el registry en la máquina y puerto especificados
+            Registry registry = LocateRegistry.getRegistry(args[0], Integer.parseInt(args[1]));
+            // obtiene una referencia remota el servicio
+            Tracker trck = (Tracker) registry.lookup("BitCascade");
             // comprobamos si ha obtenido bien la referencia:
             System.out.println("el nombre del nodo del tracker es: " + trck.getName());
-            // TODO 1: crea un objeto de la clase Publisher y usa el método
-            // remoto announceFile del Tracker para publicar el fichero
-            // (nº bloques disponible en getNumBlocks de esa clase)
-            //
-            boolean res = false; // asigna resultado de announceFile
-            if (!res) { // comprueba resultado
+            // se crea un objeto publisher para publicar el fichero
+            Publisher pub = new Publisher(args[2], args[3], Integer.parseInt(args[4]));
+            // se llama al método anounceFile del tracker
+            boolean res = trck.announceFile(pub, args[3], Integer.parseInt(args[4]), pub.getNumBlocks());
+            // comprueba resultado
+            if (!res) {
                 // si false: ya existe fichero publicado con ese nombre
                 System.err.println("Fichero ya publicado");
                 System.exit(1);

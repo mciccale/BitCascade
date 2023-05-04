@@ -15,6 +15,9 @@ import interfaces.Leech;
 import interfaces.Tracker;
 import interfaces.FileInfo;
 import java.io.IOException;
+import java.io.RandomAccessFile;
+import java.io.File;
+import java.io.FileWriter;
 
 // Un Leech guarda en esta clase auxiliar su conocimiento sobre cuál es el
 // último bloque descargado por otro Leech.
@@ -47,6 +50,7 @@ public class DownloaderImpl {
     int lastBlock = -1; // último bloque descargado por este Leech
     Seed seed;
     FileInfo fInfo;
+    transient RandomAccessFile fd;
 
     public DownloaderImpl(String n, String f, FileInfo finf) throws RemoteException, IOException {
         name = n;
@@ -57,7 +61,8 @@ public class DownloaderImpl {
         seed = finf.getSeed();
         fInfo = finf;
         // TODO 2: abre el fichero para escritura
-
+        fd = new RandomAccessFile(path, "rw");
+        fd.setLength(0);
         // TODO 3: obtiene el número del último bloque descargado por leeches
 	// anteriores (contenidos en FileInfo) usando getLastBlockNumber
 
@@ -74,8 +79,18 @@ public class DownloaderImpl {
     // realiza la descarga de un bloque y lo almacena en un fichero local
     public boolean downloadBlock(int numBl) throws RemoteException {
         // TODO 2: Lee bloque del seed y lo escribe en el fichero
-	// TODO 3: Alterna leer bloques del seed y de otros leeches
-	// TODO 4: Notifica a los leeches posteriores (notifyBlock)
+        try {
+            byte [] buf = new byte [blockSize];
+            fd.seek(numBl * blockSize);
+            if ((buf = seed.read(numBl)) != null) {
+                fd.write(buf);
+                return true;
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+	    // TODO 3: Alterna leer bloques del seed y de otros leeches
+	    // TODO 4: Notifica a los leeches posteriores (notifyBlock)
         return false;
     }
 
@@ -114,28 +129,27 @@ public class DownloaderImpl {
     // obtiene mediante lookupFile la información del fichero especificado
     // creando una instancia de esta clase
     static public DownloaderImpl init(String host, int port, String name, String file) throws RemoteException {
-        if (System.getSecurityManager() == null)
-            System.setSecurityManager(new SecurityManager());
+        /*if (System.getSecurityManager() == null)
+            System.setSecurityManager(new SecurityManager());*/
 
         DownloaderImpl down = null;
         try {
-            // TODO 1: localiza el registry en el host y puerto indicado
-            // y obtiene la referencia remota al tracker asignándola
-            // a esta variable:
-            Tracker trck = null;
-
+            // localiza el registry en la máquina y puerto especificados
+            Registry registry = LocateRegistry.getRegistry(host, port);
+            // obtiene una referencia remota el servicio
+            Tracker trck = (Tracker) registry.lookup("BitCascade");
             // comprobamos si ha obtenido bien la referencia:
             System.out.println("el nombre del nodo del tracker es: " + trck.getName());
-            // TODO 1: obtiene la información del fichero mediante el
-	    // método lookupFile del Tracker.
-            FileInfo finf = null; // asigna resultado de lookupFile
-            if (finf==null) { // comprueba resultado
+            // obtiene la información del fichero mediante el método lookupFile del Tracker.
+            FileInfo finf = trck.lookupFile(file);
+            // comprueba resultado
+            if (finf==null) {
                 // si null: no se ha publicado ese fichero
                 System.err.println("Fichero no publicado");
                 System.exit(1);
             }
-            // TODO 1: crea un objeto de la clase DownloaderImpl
-
+            // se crea un objeto de la clase DownloaderImpl
+            down = new DownloaderImpl(name, file, finf);
             // TODO 3: usa el método addLeech del tracker para añadirse
         }
         catch (Exception e) {

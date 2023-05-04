@@ -19,9 +19,9 @@ class EchoServer extends UnicastRemoteObject implements EchoService  {
             System.err.println("Usage: EchoServer RegistryPort");
             return;
         }
-        if (System.getSecurityManager() == null) {
+        /*if (System.getSecurityManager() == null) {
             System.setSecurityManager(new SecurityManager());
-        }
+        }*/
         try {
             // instancia un objeto de esta clase
             EchoServer srv = new EchoServer();
