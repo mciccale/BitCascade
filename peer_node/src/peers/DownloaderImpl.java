@@ -10,6 +10,10 @@ import java.rmi.registry.LocateRegistry;
 import java.rmi.registry.Registry;
 import java.rmi.server.UnicastRemoteObject;
 import java.util.ArrayList;
+import java.util.Map;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.stream.Collectors;
+import java.util.function.Function;
 import java.rmi.RemoteException;
 
 import interfaces.Seed;
@@ -55,7 +59,9 @@ public class DownloaderImpl extends UnicastRemoteObject implements Leech {
     int fileSize;
     Seed seed;
     FileInfo fInfo;
-    ArrayList<LeechInfo> prevDownloaders;
+    ArrayList<LeechInfo> leechList;
+    ConcurrentLinkedQueue<Leech> postLeeches;
+    Map<Leech, LeechInfo> leechMap;
     transient RandomAccessFile fd;
 
     public DownloaderImpl(String n, String f, FileInfo finf) throws RemoteException, IOException {
@@ -67,17 +73,23 @@ public class DownloaderImpl extends UnicastRemoteObject implements Leech {
         lastIndex = 0;
         seed = finf.getSeed();
         fInfo = finf;
-        prevDownloaders = new ArrayList<>();
+        leechList = new ArrayList<>();
+        postLeeches = new ConcurrentLinkedQueue<>();
         fd = new RandomAccessFile(path, "rw");
         fileSize = (int) fd.length();
         fd.setLength(0);
         // obtiene el número del último bloque descargado por leeches
 	    // anteriores (contenidos en FileInfo) usando getLastBlockNumber
-        for(Leech l : fInfo.getLeechList()) {
-            prevDownloaders.add(new LeechInfo(l, l.getLastBlockNumber()));
+        for (Leech l : fInfo.getLeechList()) {
+            leechList.add(new LeechInfo(l, l.getLastBlockNumber()));
         }
-        // TODO 4: solicita a esos leeches anteriores usando newLeech
+        // se inicializa el mapa
+        leechMap = leechList.stream().collect(Collectors.toMap(LeechInfo::getLeech, Function.identity()));
+        // solicita a esos leeches anteriores usando newLeech
         // que le notifiquen cuando progrese su descarga
+        for (LeechInfo inf : leechList) {
+            inf.getLeech().newLeech(this);
+        }
     }
     /* métodos locales */
     public int getNumBlocks() {
@@ -89,21 +101,26 @@ public class DownloaderImpl extends UnicastRemoteObject implements Leech {
     // realiza la descarga de un bloque y lo almacena en un fichero local
     public boolean downloadBlock(int numBl) throws RemoteException {
         try {
-            Leech l = null;
+            Leech leech = null;
             boolean downloaded = false;
             byte [] buf = new byte [blockSize];
             // se lleva el puntero a la posición deseada
             fd.seek(numBl * blockSize);
             // primero se comprueba si se puede descargar de algún leech
-            for (int i = lastIndex; !downloaded && i < prevDownloaders.size(); ++i) {
+            for (int i = lastIndex; !downloaded && i < leechList.size(); ++i) {
                 // se puede descargar de este leech
-                if (prevDownloaders.get(i).getLastBlock() >= numBl) {
-                    l = prevDownloaders.get(i).getLeech();
-                    if ((buf = l.read(numBl)) != null) {
+                if (leechMap.get(leechList.get(i).getLeech()).getLastBlock() >= numBl) {
+                    System.out.println("Se entra aquí");
+                    leech = leechList.get(i).getLeech();
+                    if ((buf = leech.read(numBl)) != null) {
                         fd.write(buf);
                         downloaded = true;
                         lastIndex = i + 1;
                         lastBlock = numBl;
+                        // notifica a los leeches posteriores
+                        for (Leech l : postLeeches) {
+                            l.notifyBlock(this, numBl);
+                        }
                         return true;
                     }
                 }
@@ -113,12 +130,15 @@ public class DownloaderImpl extends UnicastRemoteObject implements Leech {
                 fd.write(buf);
                 lastBlock = numBl;
                 lastIndex = 0;
+                // notifica a los leeches posteriores
+                for (Leech l : postLeeches) {
+                    l.notifyBlock(this, numBl);
+                }
                 return true;
             }
         } catch (IOException e) {
             e.printStackTrace();
         }
-	    // TODO 4: Notifica a los leeches posteriores (notifyBlock)
         return false;
     }
 
@@ -160,13 +180,21 @@ public class DownloaderImpl extends UnicastRemoteObject implements Leech {
     /* métodos remotos solo para la última fase */
     // leech solicitante será notificado del progreso de la descarga
     public void newLeech(Leech requester) throws RemoteException {
-        // TODO 4: añade ese leech a la lista de leeches posteriores
-	// que deben ser notificados
+        // añade ese leech a la lista de leeches posteriores
+	    // que deben ser notificados
+        postLeeches.add(requester);
     }
     // Informa del progreso de la descarga
     public void notifyBlock(Leech l, int nBl) throws RemoteException {
-        // TODO 4: actualizamos la información sobre el último bloque
-	// descargado por ese leech
+        // actualizamos la información sobre el último bloque
+	    // descargado por ese leech
+        LeechInfo linf = leechMap.get(l);
+        System.out.println(linf.getLeech().getName());
+        if (linf != null) {
+            System.out.println("Se actualiza el mapa");
+            linf.setLastBlock(nBl);
+            leechMap.put(l, linf);
+        }
     }
 
     // método estático que obtiene del registry una referencia al tracker y
